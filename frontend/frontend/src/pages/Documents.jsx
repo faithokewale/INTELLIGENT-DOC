@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { UploadCloud, Share2, ArrowRight, FileText } from 'lucide-react'
+import { UploadCloud, Share2, ArrowRight, FileText, Trash2 } from 'lucide-react'
 import { api, toast } from '../api'
 import StatusChip, { RoleBadge } from '../components/StatusChip'
 import ShareDialog from '../components/ShareDialog'
@@ -14,6 +14,8 @@ export default function Documents() {
   const [drag, setDrag] = useState(false)
   const [error, setError] = useState('')
   const [sharing, setSharing] = useState(null)
+  const [deleting, setDeleting] = useState(null)
+  const [removing, setRemoving] = useState(false)
   const input = useRef()
   const load = useCallback(() => api('/documents').then(setDocs).catch((e) => { setDocs((d) => d || []); toast(e.message) }), [])
   useEffect(() => { load() }, [load])
@@ -39,6 +41,14 @@ export default function Documents() {
       setDocs((d) => [{ id: r.document_id, filename: r.filename, processing_status: r.processing_status, role: 'owner', owner_email: '', created_at: new Date().toISOString() }, ...(d || [])])
       toast('Upload received. Processing has started.', 'success')
     } catch (e) { setError(e.message) } finally { setUploading(false); if (input.current) input.current.value = '' }
+  }
+
+  const remove = async () => {
+    setRemoving(true)
+    try {
+      await api(`/documents/${deleting.id}`, { method: 'DELETE' })
+      setDocs((ds) => ds.filter((d) => d.id !== deleting.id)); toast('Document deleted', 'success')
+    } catch (e) { toast(e.message) } finally { setRemoving(false); setDeleting(null) }
   }
 
   return (
@@ -70,11 +80,24 @@ export default function Documents() {
             </div>
             <StatusChip status={d.processing_status} /><RoleBadge role={d.role} />
             {d.role === 'owner' && <button onClick={() => setSharing(d)} className="btn-ghost"><Share2 size={16} /> Share</button>}
+            {d.role === 'owner' && <button onClick={() => setDeleting(d)} className="btn-ghost !p-2.5 text-red-600 dark:text-red-400" aria-label={`Delete ${d.filename}`}><Trash2 size={16} /></button>}
             <Link to={`/documents/${d.id}`} className="btn-primary">Open <ArrowRight size={16} /></Link>
           </div>
         ))}
       </div>
       {sharing && <ShareDialog doc={sharing} onClose={() => setSharing(null)} />}
+      {deleting && (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-ink/40 p-4" onMouseDown={(e) => e.target === e.currentTarget && setDeleting(null)}>
+          <div role="alertdialog" aria-modal="true" className="card w-full max-w-md animate-pop p-6">
+            <h2 className="text-lg font-bold">Delete this document?</h2>
+            <p className="mt-2 text-sm text-muted"><span className="font-semibold text-ink">{deleting.filename}</span> will be removed permanently, along with its chats and anyone's shared access. This cannot be undone.</p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button autoFocus onClick={() => setDeleting(null)} className="btn-ghost">Cancel</button>
+              <button onClick={remove} disabled={removing} className="btn bg-red-600 text-white hover:bg-red-700">{removing ? 'Deleting…' : 'Delete'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

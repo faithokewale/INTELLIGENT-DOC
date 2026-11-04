@@ -30,7 +30,8 @@ from app.services.conversation_service import (
     get_conversation_history,
 )
 from app.routers.auth import limiter
-
+from app.models.conversation import ConversationMessage
+from app.models.document_chunk import DocumentChunk
 
 logger = logging.getLogger(__name__)
 
@@ -350,11 +351,18 @@ def ask_document(
         content=question,
     )
 
-    answer = generate_answer(
-        question=question,
-        context=context,
-        conversation_history=conversation_history,
-    )
+    try:
+        answer = generate_answer(
+            question=question,
+            context=context,
+            conversation_history=conversation_history,
+        )
+    except Exception:
+        logger.exception("Answer generation failed")
+        raise HTTPException(
+            status_code=503,
+            detail="The AI service is unavailable right now, possibly because its usage limit was reached. Please try again later.",
+        )
 
     save_message(
         db=db,
@@ -545,3 +553,37 @@ def list_document_conversations(
         .all()
     )
     return [{"id": c.id, "title": c.title, "created_at": c.created_at} for c in convs]
+
+
+
+@router.delete("/{document_id}")
+def delete_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id,
+    ).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found or you are not its owner")
+
+    file_path = Path(document.file_path)
+    conv_ids = [c.id for c in db.query(Conversation.id).filter(Conversation.document_id == document_id)]
+    if conv_ids:
+        db.query(ConversationMessage).filter(
+            ConversationMessage.conversation_id.in_(conv_ids)
+        ).delete(synchronize_session=False)
+    db.query(Conversation).filter(Conversation.document_id == document_id).delete(synchronize_session=False)
+    db.query(DocumentPermission).filter(DocumentPermission.document_id == document_id).delete(synchronize_session=False)
+    db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).delete(synchronize_session=False)
+    db.delete(document)
+    db.commit()
+
+    try:
+        file_path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Could not remove file %s", file_path)
+
+    return {"message": "Document deleted", "document_id": document_id}

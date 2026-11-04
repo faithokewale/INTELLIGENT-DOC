@@ -11,7 +11,7 @@ export class ApiError extends Error { constructor(m, status) { super(m); this.st
 
 function message(status, body) {
   if (status === 429) return 'Too many requests, wait a minute and try again'
-  if (status >= 500) return 'Something went wrong on our side. Please try again.'
+  if (status >= 500 && status !== 503) return 'Something went wrong on our side. Please try again.'
   const d = body?.detail
   if (Array.isArray(d)) return d.map((x) => x.msg || String(x)).join('. ')
   if (typeof d === 'string') return d
